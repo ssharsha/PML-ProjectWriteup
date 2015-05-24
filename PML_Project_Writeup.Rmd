@@ -1,0 +1,254 @@
+---
+title: "PML_Project_Writeup"
+author: "Harsha Sattiraju"
+date: "Friday, May 22, 2015"
+output: html_document
+---
+### 1 - Executive Summary
+The goal of this project is to predict the manner in which 6 participants did an exercise. This is the "classe" variable in the training set. The rationale for the chosen predictors, why a specific model is chosen over the others, how the model is built, how was the model cross-validated and estimation of out of sample errors are documented.
+
+#### 2-a: Load a session. 
+A session where all the required objects have already been pre-created(&tested) using the exact code shown throughout this document below is loaded. This is in the interest of saving time/avoid long run-time associated with running R-mark-down file and creating objects afresh on the fly.
+```{r loadsession}
+load("~/Work_Docs/DataScience/MachineLearning/pmlassignreqobj.RData")
+```
+
+#### 2-b: Download the data & load into R.
+```{r loaddata, eval=FALSE}
+fileurl<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(fileurl, "pml-training.csv")
+pmltraindat <- read.csv("pml-training.csv", header=T)
+fileurl<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(fileurl, "pml-testing.csv")
+pmltestdat<-read.csv("pml-testing.csv", header=T)
+```
+
+#### 3 - Load necessary libraries & set the seed.
+```{r loadlibssetseed, warning=FALSE}
+library(caret)
+library(ggplot2)
+library(rattle)
+library(ggplot2)
+set.seed=300
+```
+
+#### 4 - Steps & Rationale in detection of the most sensitive predictors from the training set.
+1 - Initially, built a model using one of the machine learning algorithms from caret library such as trees (rpart) or random forests (rf) with the provided training data. The idea is to use varImp function to get a rough estimate of what are the top 15-20 important predictors.
+
+2 - Explored data i.e viewing the data to just get an idea if trends could be spotted. (scatter plots & manual inspection)
+
+3 - Read the paper: http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf
+
+4 - Based on 1, 2 & 3 above, concluded that the important parameters are: 
+
+a - 6 features for the Euler Angles: Roll, Pitch & Yaw - min, max, avg, variance, standard-deviation & amplitude. 
+
+b - Additionally variance of accelerometer for the arm, forearm, dumbbell & belt i.e total predictors: 3*6*4+4=76. 
+
+c - These were considered for each new window.
+
+d - Used several algorithms: Trees(rpart), Bagging(treebag), Boosting(gbm), Native Bayes(nb) & Random Forests(rf).  
+
+e - Used several cross-validation(CV) methods: Data-Split, K-fold(k=10), Repeated K-fold(k=10 & repeat=10) & Leave-One-Out-CV(LOOCV). 
+
+f- Out of all combinations of PML algorithms & CV methods, found that Random Forests with Repeated K-fold CV was the best combination & able to acheive ~80% out-of-sample accuracy. Equally close was Boosting either with data-split or LOOCV.
+
+5 - However, after looking at the 20 test-cases(as part of course project: Submission), the min/max/std-dev/avg/var/amp predictors were not available in the 20 rows. So, changed the strategy to use the primary predictors from which these 6 statistics were calculated. 
+
+a - So, the chosen predictors = 52:
+
+i - Euler Angles: Roll, Pitch & Yaw for each sensor = 3*4=12
+
+ii - Accelerometer, Gyrometer & Magnetometer's readings on X, Y & Z axes for each sensor = 3*3*4=36
+
+iii - Total Acceleration for all 4 sensors = 4
+  
+
+```{r estvarimp, eval=FALSE}
+modFitrpartallpred<-train(classe~., method="rpart", data=pmltraindat)
+varImp(modFitrpartallpred)
+```
+
+#### 5 - Modeling Accuracy using min/max/var/std.dev/amp/avg as experimental predictors: Sub-set data containing the 76 important features (as described in 4-4-a, b & c) plus the "classe" variable column. And clean-up the data. ModelFits in the Appendix Section at the bottom of the document.
+```{r OutOfSampleErrorsExpModel}
+confusionMatrixboostds$overall
+confusionMatrixboostrp10fcv$overall
+confusionMatrixboostloocv$overall
+confusionMatrixrfds$overall
+confusionMatrixrfloocv$overall
+confusionMatrixrfrp10fcv$overall
+confusionMatrixrpartds$overall
+confusionMatrixbagrp10fcv$overall
+confusionMatrixnbrp10fcv$overall
+```
+
+#### 6 - Modeling using the final chosen/required predictors: Sub-set data containing the 52 important features (as described in 4-5) plus the "classe" variable column. And clean-up the data.
+```{r subsetandcleanupreal, eval=FALSE}
+rmcolnum<-c(grep("^kurtosis", colnames(pmldatclean)), grep("^skewness", colnames(pmldatclean)),  grep("^min", colnames(pmldatclean)), grep("^max", colnames(pmldatclean)), grep("^stddev", colnames(pmldatclean)), grep("^amp", colnames(pmldatclean)), grep("^var", colnames(pmldatclean)), grep("^avg", colnames(pmldatclean)))
+rmcolnum<-c(1:7, rmcolnum1)
+realdat<-pmldatclean[,-rmcolnum1]
+```
+
+#### 7 - Modeling using the final chosen/required predictors: Build a model using Trees(rpart), Boosting(gbm), Bagging(treebag) & Naive Bayes(nb) PMLs in the caret library. Validate out-of-sample error using CV methods. Please see RMD file for the code pertaining to all the algorithms considered. 
+```{r CreateTrainReal, eval=FALSE}
+intrainreal<-createDataPartition(y=realdat$classe, p=0.7, list=FALSE)
+trainingreal<-realdat[intrainreal,]
+testingreal<-realdat[-intrainreal,]
+```
+
+```{r TreesDataSplitReal, eval=FALSE, echo=FALSE}
+modFitrpartrealdatds<-train(classe~., method="rpart", data=trainingreal)
+varImprpartrealdatds<-varImp(modFitrpartrealdatds)
+tabrpartrealdatds<-table(predict(modFitrpartrealdatds, testingreal), testingreal$classe)
+confusionMatrixrpartrealdatds<-confusionMatrix(tabrpartrealdatds)
+```
+
+```{r NaiveBayesDataSplitReal, eval=FALSE, echo=FALSE}
+modFitnbtrealdatds<-train(classe~., method="nb", data=trainingreal)
+varImpnbrealdatds<-varImp(modFitnbrealdatds)
+tabnbrealdatds<-table(predict(modFitnbrealdatds, testingreal), testingreal$classe)
+confusionMatrixnbrealdatds<-confusionMatrix(tabnbrealdatds)
+```
+
+```{r BoostRepeatedKfoldCV, eval=FALSE, echo=FALSE}
+train_control <- trainControl(method="repeatedcv", number=10, repeats=3)
+modFitboostrealrp10fcv<-train(classe~., method="gbm", trControl = train_control, data=trainingreal, verbose=FALSE)
+tabboostrealrp10fcv<-table(predict(modFitboostrealrp10fcv, testingreal), testingreal$classe)
+confusionMatrixboostrealrp10fcv<-confusionMatrix(tabboostrealrp10fcv)
+```
+
+```{r BoostDataSplitReal, eval=FALSE, echo=FALSE}
+modFitboostrealdatds<-train(classe~., method="gbm", data=trainingreal, verbose=FALSE)
+varImpboostrealdatds<-varImp(modFitboosttestdatds)
+tabboostrealdatds<-table(predict(modFitboostrealdatds, testingreal), testingreal$classe)
+confusionMatrixboostrealdatds<-confusionMatrix(tabboostrealdatds)
+```
+
+```{r BaggingDataSplitReal, eval=FALSE}
+modFibagrealdatds<-train(classe~., method="treebag", data=trainingreal)
+varImpbagrealdatds<-varImp(modFitbagtestdatds)
+tabbagrealdatds<-table(predict(modFitbagrealdatds, testingreal), testingreal$classe)
+confusionMatrixbagrealdatds<-confusionMatrix(tabbagrealdatds)
+```
+
+```{r OutOfSampleErrorsRealModel}
+confusionMatrixrpartrealdatds$overall
+confusionMatrixnbrealdatds$overall
+confusionMatrixboostrealdatrp10fcv$overall
+confusionMatrixboostrealdatds$overall
+confusionMatrixbagrealdatds$overall
+```
+
+```{r VarImpTabOutOfSampleErrorsChosenModel, warning=FALSE}
+varImp(modFitbagrealdatds)
+tabbagrealdatds
+confusionMatrixbagrealdatds$overall
+```
+
+#### 8 - Observations & Conclusions:
+1 - Based on fitting models (PML algorithms) to the "classe" quality variable using a - the experimental predictors(min/max/avg/std-dev/var/amp) & b - final/chosen predictors & looking at out-of-sample accuracy using the training & testing data (created out of pml-training.csv data-set):
+
+a - Repeated K-fold (K= 10 & repeated 3 times in this case) & Data-Splitting seem to be the better cross-validation methods.
+
+b - Random Forests, Bagging & Boosting seem to be better models in the caret library. 
+
+##### 2 - For above reasons: (considering run-time as higher priority especially without much hit on accuracy)
+
+##### a - PML algorithm/model used: Bagging using treebag. (over Random Forests due to shorter run-time and near equal accuracy)
+
+##### b - Cross-validation Method used: Data-Splitting. (over Repeated K-fold CV due to shorter run-time & near equal accuracy)
+
+#### 9 - Plots for the chosen model: Bagging (treebag) with data-splitting CV.
+1 - Plot of the 4 most important predictors using Bagging: treebag PML. Colored based on the predicted class.
+```{r MostImpVar}
+qplot(roll_belt, yaw_belt, colour=predict(modFitbagrealdatds, testingreal), data=testingreal)
+qplot(pitch_belt, pitch_forearm, colour=predict(modFitbagrealdatds, testingreal), data=testingreal)
+```
+
+2 - Actual Vs Predicted (training set)
+```{r ActualVsPredicted}
+qplot(testingreal$classe, predict(modFitbagrealdatds, testingreal), data=testingreal)
+```
+
+#### APPENDIX 
+1 - Modeling using min/max/var/std.dev/amp/avg predictors: Sub-set data containing the 76 important features (as described above) plus the "classe" variable column. And clean-up the data. Please see RMD file for the code.
+```{r subsetdatcleanup, eval=FALSE, echo=FALSE}
+pmldatclean <- read.csv("pml-training.csv", na.strings=c("NA", "#DIV/0!"))
+impcolnum<-c(grep("^min", colnames(pmldatclean)), grep("^max", colnames(pmldatclean)), grep("^stddev", colnames(pmldatclean)), grep("^amp", colnames(pmldatclean)), grep("^var", colnames(pmldatclean)), grep("^avg", colnames(pmldatclean)), grep("classe", colnames(pmldatclean)))
+pmldatreq<-pmldatclean[impcolnum]
+nonas<-which(complete.cases(pmlreqdat) == TRUE)
+pmldatreqclean<-pmldatreq[c(nonas),]
+```
+
+2 - Modeling using min/max/var/std.dev/amp/avg predictors: Build & compare models using various PML algorithms in the caret library. Validate out-of-sample error using various CV methods. Please see RMD file for the code.
+```{r CreateTrainTest, eval=FALSE, echo=FALSE}
+training<-createDataPartition(y=pmldatreqclean$classe, p=0.7, list=FALSE)
+intrain<-createDataPartition(y=pmldatreqclean$classe, p=0.7, list=FALSE)
+training<-pmldatreqclean[intrain,]
+testing<-pmldatreqclean[-intrain,]
+```
+
+```{r BoostDataSplitexp, eval=FALSE, echo=FALSE}
+modFitboostds<-train(classe~., method="gbm", data=training, verbose=FALSE)
+impboostds<-varImp(modFitboostds)
+tabboostds<-table(predict(modFitboostds, testing), testing$classe)
+confusionMatrixboostds<-confusionMatrix(tabboostds)
+```
+
+```{r BoostRepeatedKfoldCVexp, eval=FALSE, echo=FALSE}
+train_control <- trainControl(method="repeatedcv", number=10, repeats=3)
+modFitboostrp10fcv<-train(classe~., method="gbm", trControl = train_control, data=training, verbose=FALSE)
+tabboostrp10fcv<-table(predict(modFitboostrp10fcv, testing), testing$classe)
+confusionMatrixboostrp10fcv<-confusionMatrix(tabboostrp10fcv)
+```
+
+```{r BoostLOOCVexp, eval=FALSE, echo=FALSE}
+train_control <- trainControl(method="LOOCV" eval=FALSE)
+modFitboostloocv<-train(classe~., method="gbm", trControl = train_control, data=training, verbose=FALSE)
+tabboostloocv<-table(predict(modFitboostloocv, testing), testing$classe)
+confusionMatrixboostloocv<-confusionMatrix(tabboostloocv)
+```
+
+```{r RandomForestsDataSplitexp, eval=FALSE, echo=FALSE}
+modFitrfds<-train(classe~., method="rf", data=training, prox=TRUE)
+imprfds<-varImp(modFitrfds)
+tabrfds<-table(predict(modFitrfds, testing), testing$classe)
+confusionMatrixrfds<-confusionMatrix(tabrfds)
+```
+
+```{r RandomForestsLOOCVexp, eval=FALSE, echo=FALSE}
+train_control <- trainControl(method="LOOCV")
+modFitrfloocv<-train(classe~., method="rf", trControl = train_control, data=training, prox=TRUE)
+tabrfloocv<-table(predict(modFitrfloocv, testing), testing$classe)
+confusionMatrixrfloocv<-confusionMatrix(tabrfloocv)
+```
+
+```{r RandomForestsRepeatedKfoldCVexp, eval=FALSE, echo=FALSE}
+train_control <- trainControl(method="repeatedcv", number=10, repeats=3)
+modFitrfrp10fcv<-train(classe~., method="rf", trControl = train_control, data=training, prox=TRUE)
+tabrfrp10fcv<-table(predict(modFitrfrp10fcv, testing), testing$classe)
+confusionMatrixrfrp10fcv<-confusionMatrix(tabrfrp10fcv)
+```
+
+```{r TreesDataSplitexp, eval=FALSE, echo=FALSE}
+modFitrpartds<-train(classe~., method="rpart", data=training)
+imprpartds<-varImp(modFitrpartds)
+tabrpartds<-table(predict(modFitrpartds, testing), testing$classe)
+confusionMatrixrpartds<-confusionMatrix(tabrpartds)
+```
+
+```{r BaggingRepeatedKfoldCVexp, eval=FALSE, echo=FALSE}
+train_control <- trainControl(method="repeatedcv", number=10, repeats=3)
+modFitbagrp10fcv<-train(classe~., method="treebag", trControl = train_control, data=training)
+tabbagrp10fcv<-table(predict(modFitbagrp10fcv, testing), testing$classe)
+confusionMatrixbagrp10fcv<-confusionMatrix(tabbagrp10fcv)
+```
+
+```{r NaiveBayesRepeatedKfoldCVexp, eval=FALSE, echo=FALSE}
+train_control <- trainControl(method="repeatedcv", number=10, repeats=3)
+modFitnbrp10fcv<-train(classe~., method="nb", trControl = train_control, data=training)
+tabnbrp10fcv<-table(predict(modFitnbrp10fcv, testing), testing$classe)
+confusionMatrixnbrp10fcv<-confusionMatrix(tabnbrp10fcv)
+```
+
+
